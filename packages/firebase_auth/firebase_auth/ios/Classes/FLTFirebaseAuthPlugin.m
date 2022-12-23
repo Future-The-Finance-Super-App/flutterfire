@@ -481,17 +481,11 @@ NSString *const kErrMsgInvalidCredential =
   [auth signInWithCredential:credential
                   completion:^(FIRAuthDataResult *authResult, NSError *error) {
                     if (error != nil) {
-                      NSDictionary *userInfo = [error userInfo];
-                      NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                      NSDictionary *firebaseDictionary =
-                          underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
-
-                      if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                        // error from firebase-ios-sdk is buried in underlying
-                        // error.
-                        result.error(nil, firebaseDictionary[@"message"], nil, nil);
-                      } else {
+                        NSError *blockingError = [self handlePotentialBlockingFunction:error];
+                        
+                        if (blockingError != nil) {
+                            result.error(nil, nil, nil, blockingError);
+                        } else {
                         if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                           [self handleMultiFactorError:arguments withResult:result withError:error];
                         } else {
@@ -554,16 +548,10 @@ NSString *const kErrMsgInvalidCredential =
 static void handleSignInWithApple(FLTFirebaseAuthPlugin *object, FIRAuthDataResult *authResult,
                                   NSError *error) {
   if (error != nil) {
-      NSDictionary *userInfo = [error userInfo];
-      NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-      NSDictionary *firebaseDictionary =
-      underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+      NSError *blockingError = [object handlePotentialBlockingFunction:error];
       
-      if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-          // error from firebase-ios-sdk is buried in underlying
-          // error.
-          object.appleResult.error(nil, firebaseDictionary[@"message"], nil, nil);
+      if (blockingError != nil) {
+          object.appleResult.error(nil, nil, nil, blockingError);
       } else {
           if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
             [object handleMultiFactorError:object.appleArguments
@@ -744,16 +732,10 @@ static void handleSignInWithApple(FLTFirebaseAuthPlugin *object, FIRAuthDataResu
   [auth signInWithCustomToken:arguments[kArgumentToken]
                    completion:^(FIRAuthDataResult *_Nullable authResult, NSError *_Nullable error) {
                      if (error != nil) {
-                         NSDictionary *userInfo = [error userInfo];
-                         NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                         NSDictionary *firebaseDictionary =
-                         underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+                         NSError *blockingError = [self handlePotentialBlockingFunction:error];
                          
-                         if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                             // error from firebase-ios-sdk is buried in underlying
-                             // error.
-                             result.error(nil, firebaseDictionary[@"message"], nil, nil);
+                         if (blockingError != nil) {
+                             result.error(nil, nil, nil, blockingError);
                          } else {
                              if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                                [self handleMultiFactorError:arguments withResult:result withError:error];
@@ -765,6 +747,48 @@ static void handleSignInWithApple(FLTFirebaseAuthPlugin *object, FIRAuthDataResu
                        result.success(authResult);
                      }
                    }];
+}
+
+- (NSError *_Nullable)handlePotentialBlockingFunction:(NSError *)error {
+    NSDictionary *userInfo = [error userInfo];
+    NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
+
+    NSDictionary *firebaseDictionary =
+    underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+    
+    if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
+        NSString *serverErrorMessage = firebaseDictionary[@"message"];
+        
+        NSString *shortErrorMessage = serverErrorMessage;
+        NSString *serverDetailErrorMessage;
+        
+        NSRange colonRange = [serverErrorMessage rangeOfString:@":"];
+        if (colonRange.location != NSNotFound) {
+          shortErrorMessage = [serverErrorMessage substringToIndex:colonRange.location];
+          shortErrorMessage =
+              [shortErrorMessage stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+          serverDetailErrorMessage = [serverErrorMessage substringFromIndex:colonRange.location + 1];
+          serverDetailErrorMessage = [serverDetailErrorMessage
+              stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        }
+        
+        if ([shortErrorMessage isEqualToString:@"BLOCKING_FUNCTION_ERROR_RESPONSE"]) {
+            NSRange errorRange = [serverDetailErrorMessage rangeOfString:@"HTTP Cloud Function returned an error:"];
+            
+            NSString *errorMessage = [serverDetailErrorMessage substringFromIndex:errorRange.location + errorRange.length];
+            errorMessage = [errorMessage stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            
+            NSMutableDictionary *errorUserInfo = [NSMutableDictionary dictionary];
+            [errorUserInfo addEntriesFromDictionary:userInfo];
+            
+            errorUserInfo[NSLocalizedDescriptionKey] = errorMessage;
+            errorUserInfo[FIRAuthErrorUserInfoNameKey] = @"BLOCKING_FUNCTION_ERROR_RESPONSE";
+            
+            return [NSError errorWithDomain:FIRAuthErrorDomain code:FIRAuthErrorCodeInternalError userInfo:errorUserInfo];
+        }
+    }
+    
+    return nil;
 }
 
 - (void)handleMultiFactorError:(id)arguments
@@ -823,16 +847,10 @@ static void handleSignInWithApple(FLTFirebaseAuthPlugin *object, FIRAuthDataResu
                password:arguments[@"password"]
              completion:^(FIRAuthDataResult *_Nullable authResult, NSError *_Nullable error) {
                if (error != nil) {
-                   NSDictionary *userInfo = [error userInfo];
-                   NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                   NSDictionary *firebaseDictionary =
-                   underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+                   NSError *blockingError = [self handlePotentialBlockingFunction:error];
                    
-                   if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                       // error from firebase-ios-sdk is buried in underlying
-                       // error.
-                       result.error(nil, firebaseDictionary[@"message"], nil, nil);
+                   if (blockingError != nil) {
+                       result.error(nil, nil, nil, blockingError);
                    } else {
                        if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                          [self handleMultiFactorError:arguments withResult:result withError:error];
@@ -853,16 +871,10 @@ static void handleSignInWithApple(FLTFirebaseAuthPlugin *object, FIRAuthDataResu
                    link:arguments[@"emailLink"]
              completion:^(FIRAuthDataResult *_Nullable authResult, NSError *_Nullable error) {
                if (error != nil) {
-                   NSDictionary *userInfo = [error userInfo];
-                   NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                   NSDictionary *firebaseDictionary =
-                   underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+                   NSError *blockingError = [self handlePotentialBlockingFunction:error];
                    
-                   if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                       // error from firebase-ios-sdk is buried in underlying
-                       // error.
-                       result.error(nil, firebaseDictionary[@"message"], nil, nil);
+                   if (blockingError != nil) {
+                       result.error(nil, nil, nil, blockingError);
                    } else {
                        if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                            [self handleMultiFactorError:arguments withResult:result withError:error];
@@ -1015,16 +1027,10 @@ static void handleAppleAuthResult(FLTFirebaseAuthPlugin *object, id arguments, F
                                   FIRAuthCredential *credentials, NSError *error,
                                   FLTFirebaseMethodCallResult *result) {
   if (error) {
-      NSDictionary *userInfo = [error userInfo];
-      NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-      NSDictionary *firebaseDictionary =
-      underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+      NSError *blockingError = [object handlePotentialBlockingFunction:error];
       
-      if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-          // error from firebase-ios-sdk is buried in underlying
-          // error.
-          result.error(nil, firebaseDictionary[@"message"], nil, nil);
+      if (blockingError != nil) {
+          result.error(nil, nil, nil, blockingError);
       } else {
           if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
             [object handleMultiFactorError:arguments withResult:result withError:error];
@@ -1155,16 +1161,10 @@ static void handleAppleAuthResult(FLTFirebaseAuthPlugin *object, id arguments, F
   [currentUser linkWithCredential:credential
                        completion:^(FIRAuthDataResult *authResult, NSError *error) {
                          if (error != nil) {
-                             NSDictionary *userInfo = [error userInfo];
-                             NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                             NSDictionary *firebaseDictionary =
-                             underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+                             NSError *blockingError = [self handlePotentialBlockingFunction:error];
                              
-                             if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                                 // error from firebase-ios-sdk is buried in underlying
-                                 // error.
-                                 result.error(nil, firebaseDictionary[@"message"], nil, nil);
+                             if (blockingError != nil) {
+                                 result.error(nil, nil, nil, blockingError);
                              } else {
                                  if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                                    [self handleMultiFactorError:arguments
@@ -1199,16 +1199,10 @@ static void handleAppleAuthResult(FLTFirebaseAuthPlugin *object, id arguments, F
   [currentUser reauthenticateWithCredential:credential
                                  completion:^(FIRAuthDataResult *authResult, NSError *error) {
                                    if (error != nil) {
-                                       NSDictionary *userInfo = [error userInfo];
-                                       NSError *underlyingError = [userInfo objectForKey:NSUnderlyingErrorKey];
-
-                                       NSDictionary *firebaseDictionary =
-                                       underlyingError.userInfo[@"FIRAuthErrorUserInfoDeserializedResponseKey"];
+                                       NSError *blockingError = [self handlePotentialBlockingFunction:error];
                                        
-                                       if (firebaseDictionary != nil && firebaseDictionary[@"message"] != nil) {
-                                           // error from firebase-ios-sdk is buried in underlying
-                                           // error.
-                                           result.error(nil, firebaseDictionary[@"message"], nil, nil);
+                                       if (blockingError != nil) {
+                                           result.error(nil, nil, nil, blockingError);
                                        } else {
                                            if (error.code == FIRAuthErrorCodeSecondFactorRequired) {
                                              [self handleMultiFactorError:arguments
